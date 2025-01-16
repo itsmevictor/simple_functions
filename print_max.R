@@ -1,4 +1,4 @@
-print_max <- function(df) {
+pm <- function(df) {
     n <- df |> nrow()
 
     df |> print(n = n, na.print = "NA")
