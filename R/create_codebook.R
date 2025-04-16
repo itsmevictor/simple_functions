@@ -1,7 +1,8 @@
+## Thanks to Gemini 2.5 which (greatly) helped me write this function. 
+
 # Ensure the necessary packages are loaded
 # install.packages("ellmer") # If not already installed
 # install.packages("rlang") # ellmer uses rlang internally for %||%
-pacman::p_load(ellmer, rlang, dplyr)
 
 #' Create a Codebook for a Dataset using an LLM
 #'
@@ -29,6 +30,9 @@ pacman::p_load(ellmer, rlang, dplyr)
 #' @return A data frame containing the codebook. It will always have the
 #'   'original_name' and 'description' columns. If `translate` is TRUE,
 #'   it will also include a 'translated_name' column.
+
+#' @export
+
 #'
 #' @details
 #' Requires the `ellmer` and `dplyr` packages.

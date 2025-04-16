@@ -1,3 +1,4 @@
+#' @export
 print_max <- function(df) {
     n <- df |> nrow()
 

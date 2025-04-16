@@ -1,3 +1,4 @@
+#' @export
 check_missing <- function(df) {
     df |>
         dplyr::summarise(across(everything(), ~ sum(is.na(.x)))) |>
