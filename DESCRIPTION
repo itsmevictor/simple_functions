@@ -12,6 +12,7 @@ Imports:
     ellmer,
     dplyr,
     rlang,
+    glue, 
     sysfonts,
     showtext
 Remotes:

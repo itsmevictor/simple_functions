@@ -2,17 +2,9 @@
 % Please edit documentation in R/create_codebook.R
 \name{create_codebook}
 \alias{create_codebook}
-\title{Create a Codebook for a Dataset using an LLM}
+\title{Create a Codebook for a Dataset using an LLM (Single Query Version)}
 \usage{
-create_codebook(
-  column_names,
-  translate,
-  context = NULL,
-  chat = NULL,
-  ...,
-  rpm = 60,
-  max_active = 5
-)
+create_codebook(column_names, translate, context = NULL, chat = NULL, ...)
 }
 \arguments{
 \item{column_names}{A character vector of the original column names.}
@@ -30,32 +22,27 @@ chats (e.g., with specific models, parameters, or API keys).}
 \item{...}{Additional arguments passed to \code{ellmer::chat_anthropic()} if \code{chat}
 is NULL. Useful for specifying the model, API key, etc.
 Example: \code{model = "claude-3-opus-20240229"}.}
-
-\item{rpm}{Maximum requests per minute to send to the API. Passed to
-\code{extract_data_parallel}.}
-
-\item{max_active}{Maximum number of parallel requests allowed simultaneously.
-Passed to \code{extract_data_parallel}.}
 }
 \value{
-A data frame containing the codebook. It will always have the
+A tibble containing the codebook. It will always have the
 'original_name' and 'description' columns. If \code{translate} is TRUE,
-it will also include a 'translated_name' column.
+it will also include a 'translated_name' column. Returns an empty tibble
+with a warning if the LLM call fails or returns unexpected data.
 }
 \description{
 This function takes a vector of column names and optionally dataset context,
 then uses an LLM (defaults to Anthropic's Claude) via the 'ellmer' package
-to generate descriptions for each column. It can also translate non-English
-column names.
+to generate descriptions for all columns in a single query. It can also
+translate non-English column names.
 }
 \details{
-Requires the \code{ellmer} and \code{dplyr} packages.
+Requires the \code{ellmer}, \code{dplyr}, \code{glue}, and \code{tibble} packages.
 You need to have an Anthropic API key set up, typically via the
 \code{ANTHROPIC_API_KEY} environment variable, unless you provide a \code{chat} object
 that's already configured.
-The function uses \code{extract_data_parallel} for efficiency, which sends
-multiple requests to the LLM API concurrently. Be mindful of API rate limits
-and costs.
+This version makes a single call to the LLM API, which can be more efficient
+and provide better context for translations and descriptions compared to
+making individual calls per column.
 }
 \examples{
 \dontrun{
@@ -67,6 +54,16 @@ context_german <- "Datensatz über Kundenbestellungen in einem deutschen Online-
 # Generate codebook with translation
 codebook_german <- create_codebook(cols_german, translate = TRUE, context = context_german)
 print(codebook_german)
+
+# ---
+
+cols_norwegian <- c(
+  "Fylkenummer", "Fylkenavn", "Kommunenummer", "Kommunenavn",
+  "Antall stemmeberettigede", "Godkjente stemmegivninger - Totalt"
+)
+context_norwegian <- "Dataset of Norwegian municipal election results."
+codebook_norwegian <- create_codebook(cols_norwegian, translate = TRUE, context = context_norwegian)
+print(codebook_norwegian)
 
 # ---
 
@@ -87,18 +84,5 @@ codebook_opus <- create_codebook(
   model = "claude-3-opus-20240229"
 )
 print(codebook_opus)
-
-# ---
-
-# Using a pre-configured chat object
-my_chat <- chat_anthropic(model = "claude-3-5-sonnet-20240620", params = params(temperature = 0.2))
-codebook_preconf <- create_codebook(
-  cols_english,
-  translate = FALSE,
-  context = context_english,
-  chat = my_chat
- )
-print(codebook_preconf)
-
 }
 }

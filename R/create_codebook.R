@@ -1,15 +1,9 @@
-## Thanks to Gemini 2.5 which (greatly) helped me write this function. 
-
-# Ensure the necessary packages are loaded
-# install.packages("ellmer") # If not already installed
-# install.packages("rlang") # ellmer uses rlang internally for %||%
-
-#' Create a Codebook for a Dataset using an LLM
+#' Create a Codebook for a Dataset using an LLM (Single Query Version)
 #'
 #' This function takes a vector of column names and optionally dataset context,
 #' then uses an LLM (defaults to Anthropic's Claude) via the 'ellmer' package
-#' to generate descriptions for each column. It can also translate non-English
-#' column names.
+#' to generate descriptions for all columns in a single query. It can also
+#' translate non-English column names.
 #'
 #' @param column_names A character vector of the original column names.
 #' @param translate A logical scalar. If TRUE, the function will ask the LLM
@@ -22,26 +16,22 @@
 #' @param ... Additional arguments passed to `ellmer::chat_anthropic()` if `chat`
 #'   is NULL. Useful for specifying the model, API key, etc.
 #'   Example: `model = "claude-3-opus-20240229"`.
-#' @param rpm Maximum requests per minute to send to the API. Passed to
-#'   `extract_data_parallel`.
-#' @param max_active Maximum number of parallel requests allowed simultaneously.
-#'   Passed to `extract_data_parallel`.
 #'
-#' @return A data frame containing the codebook. It will always have the
+#' @return A tibble containing the codebook. It will always have the
 #'   'original_name' and 'description' columns. If `translate` is TRUE,
-#'   it will also include a 'translated_name' column.
-
+#'   it will also include a 'translated_name' column. Returns an empty tibble
+#'   with a warning if the LLM call fails or returns unexpected data.
+#'
 #' @export
-
 #'
 #' @details
-#' Requires the `ellmer` and `dplyr` packages.
+#' Requires the `ellmer`, `dplyr`, `glue`, and `tibble` packages.
 #' You need to have an Anthropic API key set up, typically via the
 #' `ANTHROPIC_API_KEY` environment variable, unless you provide a `chat` object
 #' that's already configured.
-#' The function uses `extract_data_parallel` for efficiency, which sends
-#' multiple requests to the LLM API concurrently. Be mindful of API rate limits
-#' and costs.
+#' This version makes a single call to the LLM API, which can be more efficient
+#' and provide better context for translations and descriptions compared to
+#' making individual calls per column.
 #'
 #' @examples
 #' \dontrun{
@@ -53,6 +43,16 @@
 #' # Generate codebook with translation
 #' codebook_german <- create_codebook(cols_german, translate = TRUE, context = context_german)
 #' print(codebook_german)
+#'
+#' # ---
+#'
+#' cols_norwegian <- c(
+#'   "Fylkenummer", "Fylkenavn", "Kommunenummer", "Kommunenavn",
+#'   "Antall stemmeberettigede", "Godkjente stemmegivninger - Totalt"
+#' )
+#' context_norwegian <- "Dataset of Norwegian municipal election results."
+#' codebook_norwegian <- create_codebook(cols_norwegian, translate = TRUE, context = context_norwegian)
+#' print(codebook_norwegian)
 #'
 #' # ---
 #'
@@ -73,28 +73,12 @@
 #'   model = "claude-3-opus-20240229"
 #' )
 #' print(codebook_opus)
-#'
-#' # ---
-#'
-#' # Using a pre-configured chat object
-#' my_chat <- chat_anthropic(model = "claude-3-5-sonnet-20240620", params = params(temperature = 0.2))
-#' codebook_preconf <- create_codebook(
-#'   cols_english,
-#'   translate = FALSE,
-#'   context = context_english,
-#'   chat = my_chat
-#'  )
-#' print(codebook_preconf)
-#'
 #' }
 create_codebook <- function(column_names,
                             translate,
                             context = NULL,
                             chat = NULL,
-                            ...,
-                            rpm = 60,
-                            max_active = 5) {
-
+                            ...) {
   # --- Input Validation ---
   if (!is.character(column_names) || length(column_names) == 0) {
     stop("`column_names` must be a non-empty character vector.", call. = FALSE)
@@ -108,103 +92,143 @@ create_codebook <- function(column_names,
   if (!is.null(chat) && !inherits(chat, "Chat")) {
     stop("`chat` must be NULL or an object of class 'Chat' from the ellmer package.", call. = FALSE)
   }
-   if (!is.numeric(rpm) || length(rpm) != 1 || rpm <= 0) {
-    stop("`rpm` must be a single positive number.", call. = FALSE)
-  }
-  if (!is.numeric(max_active) || length(max_active) != 1 || max_active <= 0) {
-    stop("`max_active` must be a single positive number.", call. = FALSE)
-  }
-
 
   # --- Setup ---
-  # Initialize chat object if not provided (defaulting to Anthropic Claude)
-  # Pass extra arguments (...) like model name to chat_anthropic
+  # Initialize chat object if not provided
   active_chat <- chat %||% ellmer::chat_anthropic(...)
-  print(class(active_chat))
-  
-  # Define the structure we expect back from the LLM for *each* column
+
+  # Define the expected output structure: an object containing an array of entries
   if (translate) {
-    output_type <- type_object(
-      translated_name = type_string(
+    entry_type <- ellmer::type_object(
+      original_name = ellmer::type_string(
+        "The original column name from the input list."
+      ),
+      translated_name = ellmer::type_string(
         "The English translation of the column name. If already English, return the original name."
       ),
-      description = type_string(
-        "A concise (~1-2 sentences) English description of the column's likely meaning or purpose based on its name and the dataset context."
+      description = ellmer::type_string(
+        "A concise (~1-2 sentences) English description of the column's likely meaning."
       )
     )
   } else {
-    output_type <- type_object(
-      description = type_string(
-         "A concise (~1-2 sentences) English description of the column's likely meaning or purpose based on its name and the dataset context."
+    entry_type <- ellmer::type_object(
+      original_name = ellmer::type_string(
+        "The original column name from the input list."
+      ),
+      description = ellmer::type_string(
+        "A concise (~1-2 sentences) English description of the column's likely meaning."
       )
     )
   }
+
+  output_type <- ellmer::type_object(
+    codebook_entries = ellmer::type_array(
+      description = "An array of codebook entries, one for each column name provided.",
+      items = entry_type
+    )
+  )
 
   # --- Prompt Generation ---
-  prompts <- list(length(column_names))
-  context_text <- if (!is.null(context)) sprintf("The overall dataset context is: '%s'.", context) else ""
-  translate_instruction_item <- if (translate) {
-      "Translate the column name to English if it's not already English (if it is, just repeat the original name)."
-    } else {
-      "The column name is expected to be in English already, no translation needed."
-    }
+  context_text <- if (!is.null(context)) context else "No specific context provided."
+  column_list_md <- paste(paste0("- '", column_names, "'"), collapse = "\n")
 
-  for (i in seq_along(column_names)) {
-    col_name <- column_names[i]
-    # Construct a specific prompt for each column
-    prompts[i] <- sprintf(
-      "You are creating a codebook entry for a dataset column.\nColumn Name: '%s'\n%s\nYour task is to:\n1. %s\n2. Provide a concise English description of what this column likely represents.\n\nExtract the requested information as a JSON object with the specified fields.",
-      col_name,
-      context_text,
-      translate_instruction_item
-    )
+  translate_instruction <- if (translate) {
+    "2. 'translated_name': The English translation of the column name. If the original name is already English, return the original name. Ensure translated names are unique where possible for distinct original names.
+    3. 'description': A concise (~1-2 sentences) English description of what this column likely represents based on its name and the dataset context."
+  } else {
+    "2. 'description': A concise (~1-2 sentences) English description of what this column likely represents based on its name and the dataset context. The column name is expected to be in English already, no translation needed."
   }
 
-   # --- LLM Interaction ---
-  message("Sending ", length(prompts), " requests to the LLM to generate codebook entries...")
-  # Use extract_data_parallel for efficiency. It returns a data frame when
-  # type is an object and convert=TRUE (default).
-  llm_results <- active_chat$extract_data_parallel(
-      prompts = prompts,
-      type = output_type,
-      convert = TRUE, # Automatically converts the list of objects to a data frame
-      rpm = rpm,
-      max_active = max_active
+  prompt <- glue::glue(
+    "You are creating a codebook for a dataset.
+  The overall dataset context is: '{context_text}'.
+  The column names are:
+  {column_list_md}
+  Your task is to generate a JSON object containing a single key 'codebook_entries'.
+  The value associated with 'codebook_entries' should be an array of JSON objects.
+  Each object in the array must correspond to one of the column names provided above and MUST contain the following keys:
+  1. 'original_name': The original column name exactly as provided in the input list.
+  {translate_instruction}
+  Ensure the output is a valid JSON object matching this structure precisely. Make sure every input column name has a corresponding entry in the output array."
   )
-  message("Received results from the LLM.")
 
-  # --- Combine Results ---
+  message("Sending 1 request to the LLM to generate codebook entries for ", length(column_names), " columns...")
 
-  # Check if the number of results matches the number of columns
-  if (nrow(llm_results) != length(column_names)) {
-      warning(sprintf("LLM returned %d results, but expected %d. Some columns might be missing descriptions or translations. Check API limits or potential errors.", nrow(llm_results), length(column_names)), call. = FALSE)
-      # Attempt a merge, which might introduce NAs
-      original_df <- data.frame(original_name = column_names)
-      # This assumes the order is maintained for successful results. A more robust
-      # approach might involve tracking indices or IDs if the API supported it.
-      # For now, we'll pad with NAs if lengths mismatch.
-       if (nrow(llm_results) < nrow(original_df)) {
-           llm_results[(nrow(llm_results) + 1):nrow(original_df), ] <- NA
-       } else if (nrow(llm_results) > nrow(original_df)) {
-            llm_results <- llm_results[1:nrow(original_df), ] # Truncate extra results
-       }
-       final_df <- dplyr::bind_cols(original_df, llm_results)
 
-  } else {
-       final_df <- dplyr::bind_cols(data.frame(original_name = column_names), llm_results)
+  llm_results_list <- tryCatch(
+    active_chat$extract_data(
+      prompt, 
+      type = output_type,
+      convert = TRUE 
+    ),
+    error = function(e) {
+      warning(paste("LLM API call failed:", e$message), call. = FALSE)
+      NULL # Return NULL on error
+    }
+  )
+
+  # --- Process Results ---
+  if (is.null(llm_results_list) || !is.list(llm_results_list) || !"codebook_entries" %in% names(llm_results_list)) {
+    warning("LLM did not return the expected 'codebook_entries' structure. Returning empty codebook.", call. = FALSE)
+    # Return an empty tibble with the correct structure
+    if (translate) {
+      return(tibble::tibble(original_name = character(0), translated_name = character(0), description = character(0)))
+    } else {
+      return(tibble::tibble(original_name = character(0), description = character(0)))
+    }
+  }
+
+  # Extract the data frame (ellmer >= 0.2.0 returns a data frame directly here if convert=TRUE)
+  llm_df <- llm_results_list$codebook_entries
+
+  if (!is.data.frame(llm_df) || !"original_name" %in% names(llm_df)) {
+    warning("LLM response's 'codebook_entries' element is not a data frame with 'original_name'. Returning empty codebook.", call. = FALSE)
+    if (translate) {
+      return(tibble::tibble(original_name = character(0), translated_name = character(0), description = character(0)))
+    } else {
+      return(tibble::tibble(original_name = character(0), description = character(0)))
+    }
+  }
+
+  # --- Combine and Finalize Results ---
+  original_df <- tibble::tibble(original_name = column_names)
+
+  # Merge LLM results with original column names to ensure order and completeness
+  # Use left_join to keep all original column names
+  final_df <- dplyr::left_join(original_df, llm_df, by = "original_name")
+
+  # Check for missing results after merge
+  missing_count <- sum(is.na(final_df$description)) # Check description as a proxy
+  if (missing_count > 0) {
+    warning(sprintf("LLM results missing for %d out of %d columns. Missing entries will have NA values.", missing_count, length(column_names)), call. = FALSE)
+  }
+  # Check for more results than expected (shouldn't happen with left_join, but good practice)
+  if (nrow(final_df) > length(column_names)) {
+    warning("LLM returned more entries than original columns. Extraneous entries ignored.", call. = FALSE)
+    # The left_join should prevent this, but as a safeguard:
+    final_df <- final_df |> dplyr::filter(original_name %in% column_names)
   }
 
 
   # Select and order columns based on the 'translate' flag
   if (translate) {
-    # Ensure translated_name column exists, even if potentially all NAs from failed merges
+    # Ensure translated_name column exists, even if it wasn't returned properly
     if (!"translated_name" %in% names(final_df)) {
-        final_df$translated_name <- NA_character_
+      final_df$translated_name <- NA_character_
+    }
+    # Ensure description column exists
+    if (!"description" %in% names(final_df)) {
+      final_df$description <- NA_character_
     }
     final_df <- dplyr::select(final_df, original_name, translated_name, description)
   } else {
+    # Ensure description column exists
+    if (!"description" %in% names(final_df)) {
+      final_df$description <- NA_character_
+    }
     final_df <- dplyr::select(final_df, original_name, description)
   }
 
-  return(final_df)
+  message("Codebook generation complete.")
+  return(tibble::as_tibble(final_df))
 }
