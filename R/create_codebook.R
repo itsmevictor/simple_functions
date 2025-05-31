@@ -133,7 +133,7 @@ create_codebook <- function(column_names,
   column_list_md <- paste(paste0("- '", column_names, "'"), collapse = "\n")
 
   translate_instruction <- if (translate) {
-    "2. 'translated_name': The English translation of the column name. If the original name is already English, return the original name. Ensure translated names are unique where possible for distinct original names.
+    "2. 'translated_name': The English translation of the column name. If the original name is already English, return the original name. Ensure translated names are unique where possible for distinct original names. It is important that each string is in snake_case format, e.g., 'election_date'.
     3. 'description': A concise (~1-2 sentences) English description of what this column likely represents based on its name and the dataset context."
   } else {
     "2. 'description': A concise (~1-2 sentences) English description of what this column likely represents based on its name and the dataset context. The column name is expected to be in English already, no translation needed."
