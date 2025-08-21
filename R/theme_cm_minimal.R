@@ -5,7 +5,7 @@
 #' @return A ggplot2 theme object.
 #' @import ggplot2
 #' @export
-theme_cm_minimal <- function() {
-    theme_minimal() +
+theme_cm_minimal <- function(...) {
+    theme_minimal(...) +
         theme(text = element_text(family = "CMU Sans Serif"))
 }
